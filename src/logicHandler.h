@@ -24,6 +24,7 @@ class LogicHandler : public Thread, public messageHandler
         void handleStop(void * buffer);
         std::shared_ptr<ServoController> _servoControllers[SERVO_COUNT];
         int _servoFd[SERVO_COUNT];
+        Logger logger;
         int _logFd;
 };
 

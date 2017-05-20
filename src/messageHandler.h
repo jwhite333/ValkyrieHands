@@ -16,16 +16,25 @@
 #define MAX_CON 10
 #define MAX_MSG_SIZE 1024 // bytes
 #define LOCALHOST_IPV4 0x7F000001 //127.0.0.1
+#define CONNECT_TRIES 100
+
+
 
 class messageHandler
 {
     public:
+        struct Message
+        {
+            int size;
+            char * buffer;
+        };
         messageHandler();
         int StartTCPServer(int port);
         int PollTCPServer(int timeout = -1);
         int ConnectToTCPServer(const char * ip, int port);
         void SendTCP(int socketFd, void *data, int type, int messageSize);
-        void * ReadTCP(int fd);
+        messageHandler::Message * ReadTCP(int fd);
+        void FreeMessage(Message * message);
 
     private:
         int connectionRequest();

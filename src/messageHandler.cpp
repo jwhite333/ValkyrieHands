@@ -39,7 +39,6 @@ int messageHandler::StartTCPServer(int port)
     if (_managerFd < 0)
     {
         // Error creating socket
-        std::cout << "Opening socket failed" << std::endl;
         return -1;
     }
     int option = 1;
@@ -47,7 +46,6 @@ int messageHandler::StartTCPServer(int port)
     if (rc != 0)
     {
         // Error setting socket options
-        std::cout << "Error setting socket options" << std::endl;
         return -1;
     }
 
@@ -55,19 +53,16 @@ int messageHandler::StartTCPServer(int port)
     if (rc < 0)
     {
         // Bind failed, close socket
-        std::cout << "Bind Failed, errno: " << errno << std::endl;
         do
         {
         } while ((close(_managerFd) == -1) && (errno == EINTR));
         return -1;
     }
-    std::cout << "Bind succeeded on port " << port << std::endl;
 
     rc = listen(_managerFd, MAX_CON);
     if (rc < 0)
     {
         // Listen failed, close socket
-        std::cout << "Listen Failed" << std::endl;
         do
         {
         } while ((close(_managerFd) == -1) && (errno == EINTR));
@@ -83,10 +78,16 @@ int messageHandler::StartTCPServer(int port)
 
 int messageHandler::PollTCPServer(int timeout)
 {
+    int rc;
     while (true)
     {
-        int rc = poll(_pollList, _numConnections + 1, timeout); // Default infinite timeout
-        if (rc < 0)
+        rc = poll(_pollList, _numConnections + 1, timeout); // Default infinite timeout
+        if (rc == 0)
+        {
+            // Timeout
+            return -2;
+        }
+        else if (rc < 0)
         {
             // Error
             return -1;
@@ -105,7 +106,12 @@ int messageHandler::PollTCPServer(int timeout)
         // Open new connections through new connection file descriptor
         if (_pollList[MANAGER].revents != 0)
         {
-            connectionRequest();
+            rc = connectionRequest();
+            if (rc < 0)
+            {
+                // Error 
+                return -1;
+            }
         }
     }
 }
@@ -128,23 +134,35 @@ int messageHandler::ConnectToTCPServer(const char * ipAddress, int port)
     if (socketFd < 0)
     {
         // Error opening socket
-        std::cout << "Opening socket failed" << std::endl;
         return -1;
     }
 
-    rc = connect(socketFd, &serverAddress, addressLength);
-    if (rc < 0)
+    int tries = 0;
+    while(tries < CONNECT_TRIES)
     {
-        // Connect failed, close socket
-        std::cout << "Connect Failed, errno: " << errno << std::endl;
-        do
+        rc = connect(socketFd, &serverAddress, addressLength);
+        if (rc < 0 && errno == ECONNREFUSED)
         {
-        } while ((close(socketFd) == -1) && (errno == EINTR));
-        return -1;
+            // Port connect is trying to conect to is not available yet, retry
+            continue;
+        }
+        else if (rc < 0)
+        {
+            // Connect failed, close socket
+            std::cout << "Connect errno: " << errno << std::endl;
+            do
+            {
+            } while ((close(socketFd) == -1) && (errno == EINTR));
+            return -1;
+        }
+        else
+        {
+            // Success
+            return socketFd;
+        }
     }
-    std::cout << "Connect succeeded on " << ipAddress << ":" << port << std::endl;
 
-    return socketFd;
+    return -1;
 }
 
 
@@ -156,24 +174,28 @@ void messageHandler::SendTCP(int socketFd, void *data, int type, int messageSize
     header->length = messageSize;
 
     // Send message
-    int rc = send(socketFd, data, messageSize, 0); // MSG_DONTWAIT
+    int rc = send(socketFd, data, messageSize, 0); // MSG_DONTWAIT?
     if (rc <= 0)
     {
         // TODO: handle errors
-        std::cout << "An error has occured while sending data, errno: " << errno << std::endl;
     }
-    std::cout << "Sent " << rc << " bytes, errno: " << errno << std::endl;
+
     return;
 }
 
-void * messageHandler::ReadTCP(int fd)
+/**
+* Read TCP 
+*   - must call free() on return pointer
+*
+**/
+messageHandler::Message * messageHandler::ReadTCP(int fd)
 {
-    std::cout << "Received a message" << std::endl;
-    char * buffer = (char *)malloc(MAX_MSG_SIZE);
-    int bytes_in = recv(fd, buffer, MAX_MSG_SIZE, MSG_DONTWAIT);
+    Message * returnMsg = (Message *)malloc(sizeof(Message));
+    returnMsg->buffer = (char *)malloc(MAX_MSG_SIZE);
+    returnMsg->size = recv(fd, returnMsg->buffer, MAX_MSG_SIZE, MSG_DONTWAIT);
 
     // Error, close socket
-    if (bytes_in == 0)
+    if (returnMsg->size == 0)
     {
         do
         {
@@ -189,25 +211,23 @@ void * messageHandler::ReadTCP(int fd)
                 removed = true;
         }
         _numConnections--;
-        free(buffer);
+        FreeMessage(returnMsg);
         return NULL;
     }
 
     // Nothing read
-    else if (bytes_in < 0)
+    else if (returnMsg->size < 0)
     {
-        std::cout << "Error reading message" << std::endl;
-        free(buffer);
+        FreeMessage(returnMsg);
         return NULL;
     }
 
     // Return message for handling
-    return buffer;
+    return returnMsg;
 }
 
 int messageHandler::connectionRequest()
 {
-    std::cout << "Received a connection request" << std::endl;
     int option = 1, rc;
     int connectionFd;
     struct sockaddr_in clientAddress;
@@ -218,7 +238,6 @@ int messageHandler::connectionRequest()
     if (connectionFd < 0)
     {
         // Accept Failed
-        std::cout << "Accept on socket failed" << std::endl;
         return -1;
     }
 
@@ -226,11 +245,10 @@ int messageHandler::connectionRequest()
     {
         // Maximum number of connections reached
         _numConnections--;
-        std::cout << "Maximum connections reached" << std::endl;
         do
         {
         } while ((close(connectionFd) == -1) && (errno == EINTR));
-        return -1;
+        return 0;
     }
 
     // turn on keep alives
@@ -238,7 +256,6 @@ int messageHandler::connectionRequest()
     if (rc != 0)
     {
         // Error setting socket options
-        std::cout << "Error setting socket options" << std::endl;
         do
         {
         } while ((close(connectionFd) == -1) && (errno == EINTR));
@@ -251,7 +268,6 @@ int messageHandler::connectionRequest()
     if (rc != 0)
     {
         // Error turning off linger
-        std::cout << "Error turning off linger" << std::endl;
         do
         {
         } while ((close(connectionFd) == -1) && (errno == EINTR));
@@ -259,8 +275,14 @@ int messageHandler::connectionRequest()
     }
 
     // Give new file descriptor to polling struct
-    std::cout << "Connection num: " << _numConnections << std::endl;
     _pollList[_numConnections].fd = connectionFd;
     _pollList[_numConnections].revents = 0;
     return 0;
+}
+
+void messageHandler::FreeMessage(Message * message)
+{
+    free(message->buffer);
+    free(message);
+    return;
 }

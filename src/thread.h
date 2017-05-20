@@ -28,17 +28,19 @@ class Thread
         {
             _running  = true;
             _name = threadName;
-            _port = bindOnPort;
+            _serverPort = bindOnPort;
 
             int rc = pthread_create(&_thread, NULL, ThreadMain, (void *)this);
             if (rc)
+            {
+                // Error starting thread
                 std::cout << "Error starting thread" << std::endl;
+            }
 
             return rc;
         }
         virtual void ThreadStop(void)
         {
-            std::cout << "Stopping Thread: " << _name << std::endl;
             pthread_exit(NULL);
             return;
         }
@@ -46,7 +48,7 @@ class Thread
     protected:
         bool _running;
         std::string _name;
-        int _port;
+        int _serverPort;
 
     private:
         static  void* ThreadMain(void* thread)

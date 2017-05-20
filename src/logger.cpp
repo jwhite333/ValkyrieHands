@@ -6,16 +6,14 @@ void Logger::ThreadEntry(void)
 {
     _LogFile.open("RPILog.txt", std::ios::out | std::ios::trunc); // Create a new file each time
 
-    _LogFile << "Thread: " << _name << " started" << std::endl;
-    std::cout << "Thread: " << _name << " started" << std::endl;
+    _LogFile << "[" << _name << "] Thread started" << std::endl;
 
     // Start TCP server
-    int rc = StartTCPServer(_port);
+    int rc = StartTCPServer(_serverPort);
     if (rc < 0)
     {
         // Starting server failed
-        _LogFile << "Starting server failed" << std::endl;
-        std::cout << "Starting server failed" << std::endl;
+        _LogFile << "[" << _name << "] Starting server failed" << std::endl;
         _LogFile.close();
         ThreadStop();
     }
@@ -34,28 +32,66 @@ void Logger::pollCommands()
         {
             // Error polling
             _LogFile.open("RPILog.txt", std::ios::out | std::ios::app);
-            _LogFile << "Error polling" << std::endl;
-            std::cout << "Error polling" << std::endl;
+            _LogFile << "[" << _name << "] Error polling" << std::endl;
             _LogFile.close();
             ThreadStop();
         }
         else
         {
             // Process message
-            char * buffer = (char *)ReadTCP(fd);
-            if (buffer == NULL)
+            Message * message = ReadTCP(fd);
+            if (message == NULL)
             {
                 // Error reading message
                 continue;
             }
 
-            // Write log TODO: check length
-            VMSG_LOG_T * logMessage = (VMSG_LOG_T *)buffer;
-            _LogFile.open("RPILog.txt", std::ios::out | std::ios::app);
-            _LogFile << logMessage->log_entry << std::endl;
-            std::cout << logMessage->log_entry << std::endl;
-            _LogFile.close();           
-            free(buffer);
+            int offset = 0;
+            while(message->size > 0)
+            {
+                // Print a message
+                log_message * logMessage = (log_message *)&message->buffer[offset];
+
+                _LogFile.open("RPILog.txt", std::ios::out | std::ios::app);
+                _LogFile << logMessage->entry << std::endl;
+                _LogFile.close();
+
+                // Incriment buffer pointer to read next message (if applicable)
+                message->size -= sizeof(log_message);
+                offset += sizeof(log_message);
+            }
+            free(message->buffer);
         }
     }
+}
+
+void Logger::LOG(int logFd, const char * format, ...)
+{
+    va_list args;
+    va_start(args, format);
+
+    log_message logData;
+    vsprintf(logData.entry, format, args);
+    va_end(args);
+
+    // Use this to find out how long the log is
+    //std::string str(logData.entry);
+    //logData.length = str.length();
+
+    logSend(logFd, &logData, sizeof(logData));
+    
+}
+
+void Logger::logSend(int socketFd, void * data, int messageSize)
+{
+    // Send message (custom send function)
+    int rc = send(socketFd, data, messageSize, 0); // MSG_DONTWAIT?
+    if (rc <= 0)
+    {
+        // TODO: handle errors
+        _LogFile.open("RPILog.txt", std::ios::out | std::ios::app);
+        _LogFile << "[" << _name << "] An error has occured while sending data, errno: " << errno << std::endl;
+        _LogFile.close();
+    }
+    return;
 }

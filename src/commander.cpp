@@ -37,24 +37,18 @@ int main(int argc, char **argv)
     sleep(1);
     std::shared_ptr<LogicHandler> logic = std::make_shared<LogicHandler>();
     logic->ThreadStart("LogicHandler", CONTROL_PORT);
-    sleep(1);
+    //sleep(1);
 
     // Display info message
     int msgCount = 0;
     std::cout << "Enter Command ( \"Help\" - For list of commands ) \n";
 
-    // Connect to Logic Thread and logger thread
+    // Connect to Logic Thread
     int socketFd = msgHandler.ConnectToTCPServer("127.0.0.1", CONTROL_PORT);
     if (socketFd < 0)
     {
         // Error connecting to socket
         std::cout << "Error connecting to logic handler server" << std::endl;
-    }
-    int logFd = msgHandler.ConnectToTCPServer("127.0.0.1", LOG_PORT);
-    if (socketFd < 0)
-    {
-        // Error connecting to socket
-        std::cout << "Error connecting to logger server" << std::endl;
     }
 
     while (true) // ros::ok()

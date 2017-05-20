@@ -30,21 +30,8 @@ extern std::map<std::string, int> commandMap;
 // Command descriptions
 extern std::string VMSG_NAMES[VMSG_COUNT];
 
-/**
-* Logger
-*
-**/
-typedef struct log_type
-{
-    log_type(std::string log)
-    {
-        log_entry = log;
-        length = log.length();
-    }
-
-    uint16_t length;
-    std::string log_entry;
-} VMSG_LOG_T;
+// Message sizes
+extern std::map<VMSG_TYPES, int> messageSizes;
 
 /**
 * Header

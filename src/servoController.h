@@ -23,6 +23,8 @@ class ServoController : public Thread, public messageHandler
         std::map<VMSG_TYPES, CallbackFunction> _callbackMap;
         void handlePauseMotion(void * buffer);
         void handleStop(void * buffer);
+        Logger logger;
+        int _logFd;
 };
 
 #endif

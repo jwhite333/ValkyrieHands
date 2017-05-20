@@ -8,29 +8,28 @@ void LogicHandler::ThreadEntry(void)
     if (_logFd < 0)
     {
         // Error connecting to logger thread
-        std::cout << "Error connecting to logger thread" << std::endl;
+        std::cout << "[" << _name << "] Error connecting to logger thread" << std::endl;
         ThreadStop();
     }
-
-    VMSG_LOG_T log("Thread: " + _name + " started");
-    SendTCP(_logFd, &log, 0, sizeof(log));
-    //std::cout << "Thread: " << _name << " started" << std::endl;
+    logger.LOG(_logFd, "[%s] Thread started", _name.c_str());
+    logger.LOG(_logFd, "[%s] Connected to logger at: %s:%d", _name.c_str(), "127.0.0.1", LOG_PORT);
 
     // Initialize callback map
     _callbackMap[VMSG_PAUSE_MOTION] = &LogicHandler::handlePauseMotion;
     _callbackMap[VMSG_STOP] = &LogicHandler::handleStop;
 
     // Start TCP server
-    int rc = StartTCPServer(_port);
+    int rc = StartTCPServer(_serverPort);
     if (rc < 0)
     {
         // Starting server failed
-        std::cout << "Starting server failed" << std::endl;
+        logger.LOG(_logFd, "[%s] Starting server failed", _name.c_str());
         ThreadStop();
     }
+    logger.LOG(_logFd, "[%s] Started server on port %d", _name.c_str(), _serverPort);
 
     // Start servo threads
-    std::cout << "Starting servo threads" << std::endl;
+    logger.LOG(_logFd, "[%s] Starting servo threads", _name.c_str());
     for (int servo_num = 0; servo_num < SERVO_COUNT; servo_num++)
     {
         std::stringstream ss;
@@ -40,7 +39,7 @@ void LogicHandler::ThreadEntry(void)
         _servoControllers[servo_num] = std::make_shared<ServoController>();
         _servoControllers[servo_num]->ThreadStart(threadName, (CONTROL_PORT + 1) + servo_num); // 3741 - 3750
     }
-    sleep(1);
+    //sleep(2);
 
     // Connect to servo threads
     for (int servo_num = 0; servo_num < SERVO_COUNT; servo_num++)
@@ -49,9 +48,10 @@ void LogicHandler::ThreadEntry(void)
         if (_servoFd[servo_num] < 0)
         {
             // Error connecting to socket
-            std::cout << "Error connecting to Servo thread " << servo_num << std::endl;
+            logger.LOG(_logFd, "[%s] Error connecting to ServoController %d", _name.c_str(), (CONTROL_PORT + 1) + servo_num);
             ThreadStop();
         }
+        logger.LOG(_logFd, "[%s] Connected to ServoController on port %d", _name.c_str(), (CONTROL_PORT + 1) + servo_num);
     }
     
 
@@ -64,29 +64,42 @@ void LogicHandler::pollCommands()
     while (_running)
     {
         fd = PollTCPServer();
-        if (fd < 0)
+        if (fd == -1)
         {
             // Error polling
-            std::cout << "Error polling" << std::endl;
+            logger.LOG(_logFd, "[%s] Error polling", _name.c_str());
             ThreadStop();
+        }
+        else if (fd == -2)
+        {
+            // Timeout
+            continue;
         }
         else
         {
             // Process message
-            char * buffer = (char *)ReadTCP(fd);
-            if (buffer == NULL)
+            Message * message = ReadTCP(fd);
+            if (message == NULL)
             {
                 // Error reading message
                 continue;
             }
 
-            // Determine data type
-            VMSG_HEADER_T * header = (VMSG_HEADER_T *)buffer;
-            VMSG_TYPES messageType = (VMSG_TYPES)header->type;
+            int offset = 0;
+            while(message->size > 0)
+            {
+                // Determine data type
+                VMSG_HEADER_T * header = (VMSG_HEADER_T *)message->buffer;
+                VMSG_TYPES messageType = (VMSG_TYPES)header->type;
 
-            // Process data
-            (this->*_callbackMap[messageType])(buffer);            
-            free(buffer);
+                // Process data
+                (this->*_callbackMap[messageType])(message->buffer);
+
+                // Incriment buffer pointer to read next message (if applicable)
+                message->size -= messageSizes[messageType];
+                offset += messageSizes[messageType];
+            }
+            FreeMessage(message);
         }
     }
 }
@@ -95,7 +108,7 @@ void LogicHandler::handlePauseMotion(void * buffer)
 {
     // Handle message
     VMSG_PAUSE_MOTION_T * pause = (VMSG_PAUSE_MOTION_T *)buffer;
-    std::cout << "Received Pause Motion, duration: " << pause->duration << std::endl;
+    logger.LOG(_logFd, "[%s] Received pause motion command, duration: %d", _name.c_str(), pause->duration);
 
     // Forward to servo thread
     for (int servo_num = 0; servo_num < SERVO_COUNT; servo_num++)
@@ -115,6 +128,7 @@ void LogicHandler::handleStop(void * buffer)
     {
         SendTCP(_servoFd[servo_num], buffer, VMSG_STOP, sizeof(VMSG_STOP_T));
     }
-    return;
+    logger.LOG(_logFd, "[%s] Stopping thread", _name.c_str());
     ThreadStop();
+    return;
 }
